@@ -147,11 +147,12 @@ class SharedStats {
             serviceLock.unlock();
         }
     }
+}
 
-    // ⚠️ THE READY QUEUE: shared by ALL the CPU threads ⚠️
-    // In Assignment 1 only the main thread used the queue. Now several CPUs poll
-    // and re-enqueue processes
-    // at the same time, so every access to `list` and `map` is a critical section.
+// ⚠️ THE READY QUEUE: shared by ALL the CPU threads ⚠️
+// In Assignment 1 only the main thread used the queue. Now several CPUs poll
+// and re-enqueue processes
+// at the same time, so every access to `list` and `map` is a critical section.
 class ReadyQueue {
     private final LinkedList<Thread> list = new LinkedList<>(); // FIFO queue of threads
     private final Map<Thread, Process> map = new HashMap<>(); // thread -> process (same idea as Assignment 1)
@@ -180,11 +181,6 @@ class ReadyQueue {
         } finally {
             queueLock.unlock();
         }
-    }
-    // TODO Feature 3: signal that one more process is available in the queue
-
-    System.out.println(Colors.BLUE+"  ➕ "+Colors.BOLD+Colors.CYAN+process.getName()+Colors.RESET+Colors.BLUE+" (Priority: "+process.getPriority()+") added to ready queue"+Colors.RESET+" │ Remaining: "+Colors.YELLOW+process.getRemainingTime()+"ms"+Colors.RESET+" of "+process.getBurstTime()+"ms");
-
     }
 
     // Remove and return the thread at the head of the queue (or null if the queue
@@ -233,189 +229,193 @@ class ReadyQueue {
             queueLock.unlock();
         }
     }
+}
 
-    // Class representing a process (same as Assignment 1) - executes ONE time
-    // quantum per thread start
-    class Process implements Runnable {
-        private final String name;
-        private final int burstTime; // total CPU time needed (nominal ms)
-        private final int timeQuantum; // maximum time per CPU access (nominal ms)
-        private int remainingTime;
-        private final int priority; // Assignment 1 - Feature 1: priority 1..10 (10 = highest), display only
-        private final long creationTime; // Assignment 1 - Feature 3: for waiting / turnaround time
-        private long completionTime = 0;
-        private volatile int cpuId = 0; // the CPU thread that is currently running this process
+// Class representing a process (same as Assignment 1) - executes ONE time
+// quantum per thread start
+class Process implements Runnable {
+    private final String name;
+    private final int burstTime; // total CPU time needed (nominal ms)
+    private final int timeQuantum; // maximum time per CPU access (nominal ms)
+    private int remainingTime;
+    private final int priority; // Assignment 1 - Feature 1: priority 1..10 (10 = highest), display only
+    private final long creationTime; // Assignment 1 - Feature 3: for waiting / turnaround time
+    private long completionTime = 0;
+    private volatile int cpuId = 0; // the CPU thread that is currently running this process
 
-        public Process(String name, int burstTime, int timeQuantum, int priority) {
-            this.name = name;
-            this.burstTime = burstTime;
-            this.timeQuantum = timeQuantum;
-            this.remainingTime = burstTime;
-            this.priority = priority;
-            this.creationTime = System.currentTimeMillis();
+    public Process(String name, int burstTime, int timeQuantum, int priority) {
+        this.name = name;
+        this.burstTime = burstTime;
+        this.timeQuantum = timeQuantum;
+        this.remainingTime = burstTime;
+        this.priority = priority;
+        this.creationTime = System.currentTimeMillis();
+    }
+
+    public void setCpuId(int cpuId) {
+        this.cpuId = cpuId;
+    }
+
+    @Override
+    public void run() {
+        int runTime = Math.min(timeQuantum, remainingTime);
+
+        // Assignment 1 - Feature 2: a context switch happens every time a process
+        // starts running on a CPU
+        SharedStats.incrementContextSwitch();
+
+        System.out.println(Colors.BRIGHT_GREEN + "  ▶ [CPU-" + cpuId + "] " + Colors.BOLD + Colors.CYAN + name +
+                Colors.RESET + Colors.GREEN + " (Priority: " + priority + ") executing quantum" + Colors.RESET +
+                " [" + runTime + "ms]");
+
+        try {
+            Thread.sleep(runTime / Config.TIME_SCALE); // simulate the execution
+        } catch (InterruptedException e) {
+            System.out.println(Colors.RED + "  ✗ " + name + " was interrupted." + Colors.RESET);
         }
 
-        public void setCpuId(int cpuId) {
-            this.cpuId = cpuId;
-        }
+        remainingTime -= runTime;
+        SharedStats.addServiceTime(runTime);
 
-        @Override
-        public void run() {
-            int runTime = Math.min(timeQuantum, remainingTime);
+        int overallProgress = (int) (((double) (burstTime - remainingTime) / burstTime) * 100);
+        System.out.println(Colors.YELLOW + "  ⏸ [CPU-" + cpuId + "] " + Colors.CYAN + name + Colors.RESET +
+                " completed quantum " + Colors.BRIGHT_YELLOW + runTime + "ms" + Colors.RESET +
+                " │ Overall progress: " + createProgressBar(overallProgress, 20) +
+                Colors.MAGENTA + "  remaining: " + remainingTime + "ms" + Colors.RESET);
 
-            // Assignment 1 - Feature 2: a context switch happens every time a process
-            // starts running on a CPU
-            SharedStats.incrementContextSwitch();
-
-            System.out.println(Colors.BRIGHT_GREEN + "  ▶ [CPU-" + cpuId + "] " + Colors.BOLD + Colors.CYAN + name +
-                    Colors.RESET + Colors.GREEN + " (Priority: " + priority + ") executing quantum" + Colors.RESET +
-                    " [" + runTime + "ms]");
-
-            try {
-                Thread.sleep(runTime / Config.TIME_SCALE); // simulate the execution
-            } catch (InterruptedException e) {
-                System.out.println(Colors.RED + "  ✗ " + name + " was interrupted." + Colors.RESET);
-            }
-
-            remainingTime -= runTime;
-            SharedStats.addServiceTime(runTime);
-
-            int overallProgress = (int) (((double) (burstTime - remainingTime) / burstTime) * 100);
-            System.out.println(Colors.YELLOW + "  ⏸ [CPU-" + cpuId + "] " + Colors.CYAN + name + Colors.RESET +
-                    " completed quantum " + Colors.BRIGHT_YELLOW + runTime + "ms" + Colors.RESET +
-                    " │ Overall progress: " + createProgressBar(overallProgress, 20) +
-                    Colors.MAGENTA + "  remaining: " + remainingTime + "ms" + Colors.RESET);
-
-            if (remainingTime > 0) {
-                System.out.println(Colors.BLUE + "  ↻ " + Colors.CYAN + name + Colors.RESET +
-                        " yields CPU for context switch");
-            } else {
-                completionTime = System.currentTimeMillis();
-                SharedStats.incrementCompletedProcess();
-                System.out.println(Colors.BRIGHT_GREEN + "  ✓ " + Colors.BOLD + Colors.CYAN + name + Colors.RESET +
-                        Colors.BRIGHT_GREEN + " finished execution!" + Colors.RESET);
-            }
-        }
-
-        private String createProgressBar(int progress, int width) {
-            int filled = (progress * width) / 100;
-            StringBuilder bar = new StringBuilder("[");
-            for (int i = 0; i < width; i++) {
-                bar.append(i < filled ? Colors.GREEN + "█" + Colors.RESET : Colors.WHITE + "░" + Colors.RESET);
-            }
-            bar.append("] ").append(progress).append("%");
-            return bar.toString();
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public int getBurstTime() {
-            return burstTime;
-        }
-
-        public int getRemainingTime() {
-            return remainingTime;
-        }
-
-        public int getPriority() {
-            return priority;
-        }
-
-        public boolean isFinished() {
-            return remainingTime <= 0;
-        }
-
-        // Nominal turnaround time (ms) = (completion - creation) scaled back to the
-        // nominal time
-        public long getTurnaroundTime() {
-            return completionTime == 0 ? 0 : (completionTime - creationTime) * Config.TIME_SCALE;
-        }
-
-        // Nominal waiting time (ms) = turnaround time - burst time
-        public long getWaitingTime() {
-            return completionTime == 0 ? 0 : Math.max(0, getTurnaroundTime() - burstTime);
+        if (remainingTime > 0) {
+            System.out.println(Colors.BLUE + "  ↻ " + Colors.CYAN + name + Colors.RESET +
+                    " yields CPU for context switch");
+        } else {
+            completionTime = System.currentTimeMillis();
+            SharedStats.incrementCompletedProcess();
+            System.out.println(Colors.BRIGHT_GREEN + "  ✓ " + Colors.BOLD + Colors.CYAN + name + Colors.RESET +
+                    Colors.BRIGHT_GREEN + " finished execution!" + Colors.RESET);
         }
     }
 
-    // A CPU of the simulated machine: takes a process from the shared ready queue,
-    // runs ONE quantum, and repeats.
-    // (In Assignment 1 this loop was executed by the main thread: now several CPUs
-    // execute it at the same time.)
-    class CpuWorker extends Thread {
-        private final int cpuId;
-        private final ReadyQueue readyQueue;
-
-        public CpuWorker(int cpuId, ReadyQueue readyQueue) {
-            super("CPU-" + cpuId);
-            this.cpuId = cpuId;
-            this.readyQueue = readyQueue;
+    private String createProgressBar(int progress, int width) {
+        int filled = (progress * width) / 100;
+        StringBuilder bar = new StringBuilder("[");
+        for (int i = 0; i < width; i++) {
+            bar.append(i < filled ? Colors.GREEN + "█" + Colors.RESET : Colors.WHITE + "░" + Colors.RESET);
         }
+        bar.append("] ").append(progress).append("%");
+        return bar.toString();
+    }
 
-        @Override
-        public void run() {
-            while (SharedStats.getCompletedProcessCount() < SharedStats.totalProcesses) {
+    public String getName() {
+        return name;
+    }
 
-                // TODO Feature 3: replace this polling loop by a blocking wait on the counting
-                // semaphore
-                Thread thread = readyQueue.poll();
-                if (thread == null) {
-                    // ⚠️ BUSY WAITING: the CPU keeps checking an empty queue instead of sleeping
-                    // until
-                    // a process is available. It wastes CPU time and needs the "completed == total"
-                    // test above to stop.
-                    SharedStats.busyWaitPolls.incrementAndGet(); // (counted for the verification block)
-                    try {
-                        Thread.sleep(20);
-                    } catch (InterruptedException e) {
-                        return;
-                    }
-                    continue;
-                }
+    public int getBurstTime() {
+        return burstTime;
+    }
 
-                Process process = readyQueue.processOf(thread);
-                System.out.println(Colors.MAGENTA + "  ┌─ [CPU-" + cpuId + "] picks " + Colors.BRIGHT_CYAN +
-                        process.getName() + Colors.MAGENTA + " │ Ready queue: [" + Colors.BRIGHT_WHITE +
-                        readyQueue.snapshot() + Colors.MAGENTA + "]" + Colors.RESET);
+    public int getRemainingTime() {
+        return remainingTime;
+    }
 
-                process.setCpuId(cpuId);
-                thread.start(); // run one quantum
+    public int getPriority() {
+        return priority;
+    }
+
+    public boolean isFinished() {
+        return remainingTime <= 0;
+    }
+
+    // Nominal turnaround time (ms) = (completion - creation) scaled back to the
+    // nominal time
+    public long getTurnaroundTime() {
+        return completionTime == 0 ? 0 : (completionTime - creationTime) * Config.TIME_SCALE;
+    }
+
+    // Nominal waiting time (ms) = turnaround time - burst time
+    public long getWaitingTime() {
+        return completionTime == 0 ? 0 : Math.max(0, getTurnaroundTime() - burstTime);
+    }
+}
+
+// A CPU of the simulated machine: takes a process from the shared ready queue,
+// runs ONE quantum, and repeats.
+// (In Assignment 1 this loop was executed by the main thread: now several CPUs
+// execute it at the same time.)
+class CpuWorker extends Thread {
+    private final int cpuId;
+    private final ReadyQueue readyQueue;
+
+    public CpuWorker(int cpuId, ReadyQueue readyQueue) {
+        super("CPU-" + cpuId);
+        this.cpuId = cpuId;
+        this.readyQueue = readyQueue;
+    }
+
+    @Override
+    public void run() {
+        while (SharedStats.getCompletedProcessCount() < SharedStats.totalProcesses) {
+
+            // TODO Feature 3: replace this polling loop by a blocking wait on the counting
+            // semaphore
+            Thread thread = readyQueue.poll();
+            if (thread == null) {
+                // ⚠️ BUSY WAITING: the CPU keeps checking an empty queue instead of sleeping
+                // until
+                // a process is available. It wastes CPU time and needs the "completed == total"
+                // test above to stop.
+                SharedStats.busyWaitPolls.incrementAndGet(); // (counted for the verification block)
                 try {
-                    thread.join(); // wait for the end of the quantum
+                    Thread.sleep(20);
                 } catch (InterruptedException e) {
-                    System.out.println("CPU-" + cpuId + " interrupted.");
+                    return;
                 }
-
-                if (!process.isFinished()) {
-                    readyQueue.add(process); // not finished: back to the ready queue
-                }
-
-                // TODO Feature 3: when the LAST process has completed, wake up the CPUs that
-                // are blocked on the
-                // semaphore so that they can terminate (otherwise they would wait forever!)
+                continue;
             }
+
+            Process process = readyQueue.processOf(thread);
+            System.out.println(Colors.MAGENTA + "  ┌─ [CPU-" + cpuId + "] picks " + Colors.BRIGHT_CYAN +
+                    process.getName() + Colors.MAGENTA + " │ Ready queue: [" + Colors.BRIGHT_WHITE +
+                    readyQueue.snapshot() + Colors.MAGENTA + "]" + Colors.RESET);
+
+            process.setCpuId(cpuId);
+            thread.start(); // run one quantum
+            try {
+                thread.join(); // wait for the end of the quantum
+            } catch (InterruptedException e) {
+                System.out.println("CPU-" + cpuId + " interrupted.");
+            }
+
+            if (!process.isFinished()) {
+                readyQueue.add(process); // not finished: back to the ready queue
+            }
+
+            // TODO Feature 3: when the LAST process has completed, wake up the CPUs that
+            // are blocked on the
+            // semaphore so that they can terminate (otherwise they would wait forever!)
         }
     }
+}
 
 public class SchedulerSimulationSync {
     public static void main(String[] args) {
         // ⚠️ IMPORTANT: Put your student ID here to seed the random number generator
         // This makes your output unique to you - DO NOT forget to change this!
-        int studentID = 444050133;  // ← CHANGE THIS TO YOUR ACTUAL STUDENT ID
+        int studentID = 444050133; // ← CHANGE THIS TO YOUR ACTUAL STUDENT ID
 
         Random random = new Random(studentID);
 
-        // Same random values as Assignment 1 (quantum, number of processes and burst times)
-        int timeQuantum = 2000 + random.nextInt(4) * 1000;       // 2000, 3000, 4000 or 5000 ms
-        int numProcesses = 10 + random.nextInt(11);              // 10 to 20 processes
+        // Same random values as Assignment 1 (quantum, number of processes and burst
+        // times)
+        int timeQuantum = 2000 + random.nextInt(4) * 1000; // 2000, 3000, 4000 or 5000 ms
+        int numProcesses = 10 + random.nextInt(11); // 10 to 20 processes
         int[] burstTimes = new int[numProcesses];
         for (int i = 0; i < numProcesses; i++) {
             burstTimes[i] = timeQuantum / 2 + random.nextInt(2 * timeQuantum + 1);
         }
-        // New in Assignment 3: number of CPUs (2 to 4), drawn AFTER the Assignment 1 values
+        // New in Assignment 3: number of CPUs (2 to 4), drawn AFTER the Assignment 1
+        // values
         int numCPUs = 2 + random.nextInt(3);
-        // Priorities (1..10) come from a separate generator so that the Assignment 1 values above never change
+        // Priorities (1..10) come from a separate generator so that the Assignment 1
+        // values above never change
         Random priorityRandom = new Random(studentID + 1L);
 
         SharedStats.totalProcesses = numProcesses;
@@ -425,18 +425,23 @@ public class SchedulerSimulationSync {
 
         printHeader(studentID, numProcesses, timeQuantum, numCPUs);
 
-        // Create the processes and put them in the ready queue (single thread here: no race yet)
+        // Create the processes and put them in the ready queue (single thread here: no
+        // race yet)
         for (int i = 0; i < numProcesses; i++) {
             Process process = new Process("P" + (i + 1), burstTimes[i], timeQuantum, 1 + priorityRandom.nextInt(10));
             allProcesses.add(process);
             readyQueue.add(process);
         }
 
-        System.out.println("\n" + Colors.BOLD + Colors.GREEN + "╔════════════════════════════════════════════════════════════════════════════════╗" + Colors.RESET);
-        System.out.println(Colors.BOLD + Colors.GREEN + "║" + Colors.RESET + Colors.BG_GREEN + Colors.WHITE + Colors.BOLD +
+        System.out.println("\n" + Colors.BOLD + Colors.GREEN
+                + "╔════════════════════════════════════════════════════════════════════════════════╗" + Colors.RESET);
+        System.out.println(Colors.BOLD + Colors.GREEN + "║" + Colors.RESET + Colors.BG_GREEN + Colors.WHITE
+                + Colors.BOLD +
                 "                  ▶  " + numCPUs + " CPUs STARTING (CONCURRENT SCHEDULER)  ◀                    " +
                 Colors.RESET + Colors.BOLD + Colors.GREEN + "║" + Colors.RESET);
-        System.out.println(Colors.BOLD + Colors.GREEN + "╚════════════════════════════════════════════════════════════════════════════════╝" + Colors.RESET + "\n");
+        System.out.println(Colors.BOLD + Colors.GREEN
+                + "╚════════════════════════════════════════════════════════════════════════════════╝" + Colors.RESET
+                + "\n");
 
         // Start the CPUs
         List<CpuWorker> cpus = new ArrayList<>();
@@ -446,17 +451,22 @@ public class SchedulerSimulationSync {
             cpu.start();
         }
 
-        // Watchdog: if the CPUs do not terminate in a reasonable time, something is wrong with your synchronization
+        // Watchdog: if the CPUs do not terminate in a reasonable time, something is
+        // wrong with your synchronization
         long expectedMs = 0;
-        for (int b : burstTimes) expectedMs += b / Config.TIME_SCALE;
+        for (int b : burstTimes)
+            expectedMs += b / Config.TIME_SCALE;
         long timeoutMs = 3 * expectedMs / numCPUs + 15000;
         long deadline = System.currentTimeMillis() + timeoutMs;
         boolean stuck = false;
         try {
             for (CpuWorker cpu : cpus) {
                 long left = deadline - System.currentTimeMillis();
-                if (left > 0) cpu.join(left);
-                if (cpu.isAlive()) { stuck = true; }
+                if (left > 0)
+                    cpu.join(left);
+                if (cpu.isAlive()) {
+                    stuck = true;
+                }
             }
         } catch (InterruptedException e) {
             System.out.println("Main thread interrupted.");
@@ -465,13 +475,15 @@ public class SchedulerSimulationSync {
         int expectedQuanta = 0;
         long expectedService = 0;
         for (int b : burstTimes) {
-            expectedQuanta += (b + timeQuantum - 1) / timeQuantum;     // ceil(b / quantum)
+            expectedQuanta += (b + timeQuantum - 1) / timeQuantum; // ceil(b / quantum)
             expectedService += b;
         }
 
         if (stuck) {
-            System.out.println("\n" + Colors.BOLD + Colors.RED + "⛔ WATCHDOG: the simulation did not finish (" + timeoutMs / 1000 +
-                    " s). A process was lost, or a CPU is blocked forever, or the 'completed' counter lost an update." + Colors.RESET);
+            System.out.println("\n" + Colors.BOLD + Colors.RED + "⛔ WATCHDOG: the simulation did not finish ("
+                    + timeoutMs / 1000 +
+                    " s). A process was lost, or a CPU is blocked forever, or the 'completed' counter lost an update."
+                    + Colors.RESET);
         }
         printResults(allProcesses, expectedQuanta, expectedService, numProcesses);
         if (stuck) {
@@ -482,25 +494,31 @@ public class SchedulerSimulationSync {
     private static void printHeader(int studentID, int numProcesses, int timeQuantum, int numCPUs) {
         String line = "═".repeat(87);
         System.out.println("\n" + Colors.BOLD + Colors.BRIGHT_CYAN + "╔" + line + "╗" + Colors.RESET);
-        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "║" + Colors.RESET + Colors.BG_BLUE + Colors.BRIGHT_WHITE + Colors.BOLD +
+        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "║" + Colors.RESET + Colors.BG_BLUE + Colors.BRIGHT_WHITE
+                + Colors.BOLD +
                 "           CONCURRENT CPU SCHEDULER SIMULATION (ASSIGNMENT 3 - SYNCHRONIZATION)          " +
                 Colors.RESET + Colors.BOLD + Colors.BRIGHT_CYAN + "║" + Colors.RESET);
         System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "╠" + line + "╣" + Colors.RESET);
         printHeaderRow("  Processes:       ", String.valueOf(numProcesses));
-        printHeaderRow("  Time Quantum:    ", timeQuantum + "ms (nominal, simulated " + Config.TIME_SCALE + "x faster)");
+        printHeaderRow("  Time Quantum:    ",
+                timeQuantum + "ms (nominal, simulated " + Config.TIME_SCALE + "x faster)");
         printHeaderRow("  CPUs:            ", String.valueOf(numCPUs));
         printHeaderRow("  Student ID:      ", String.valueOf(studentID));
         System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "╚" + line + "╝" + Colors.RESET + "\n");
     }
 
     private static void printHeaderRow(String label, String value) {
-        System.out.println(Colors.BOLD + Colors.BRIGHT_CYAN + "║" + Colors.RESET + Colors.YELLOW + label + Colors.RESET +
-                Colors.BRIGHT_YELLOW + String.format("%-68s", value) + Colors.BOLD + Colors.BRIGHT_CYAN + "║" + Colors.RESET);
+        System.out
+                .println(Colors.BOLD + Colors.BRIGHT_CYAN + "║" + Colors.RESET + Colors.YELLOW + label + Colors.RESET +
+                        Colors.BRIGHT_YELLOW + String.format("%-68s", value) + Colors.BOLD + Colors.BRIGHT_CYAN + "║"
+                        + Colors.RESET);
     }
 
     // Verification block + Assignment 1 summary table (waiting and turnaround time)
-    private static void printResults(List<Process> processes, int expectedQuanta, long expectedService, int numProcesses) {
-        System.out.println("\n" + Colors.BOLD + Colors.BRIGHT_GREEN + "═══ VERIFICATION (expected values are computed from YOUR seed) ═══" + Colors.RESET);
+    private static void printResults(List<Process> processes, int expectedQuanta, long expectedService,
+            int numProcesses) {
+        System.out.println("\n" + Colors.BOLD + Colors.BRIGHT_GREEN
+                + "═══ VERIFICATION (expected values are computed from YOUR seed) ═══" + Colors.RESET);
         boolean ok = true;
         ok &= verifyLine("Context switches (quanta executed)", expectedQuanta, SharedStats.getContextSwitchCount());
         ok &= verifyLine("Completed processes", numProcesses, SharedStats.getCompletedProcessCount());
@@ -508,10 +526,15 @@ public class SchedulerSimulationSync {
         ok &= verifyLine("Busy-waiting polls (must be 0)", 0, SharedStats.busyWaitPolls.get());
         System.out.println(ok
                 ? Colors.BOLD + Colors.BRIGHT_GREEN + "  ✔ All shared values are consistent." + Colors.RESET
-                : Colors.BOLD + Colors.RED + "  ✘ At least one check failed (see the ✘ lines above): a race condition or busy waiting is still present." + Colors.RESET);
+                : Colors.BOLD + Colors.RED
+                        + "  ✘ At least one check failed (see the ✘ lines above): a race condition or busy waiting is still present."
+                        + Colors.RESET);
 
-        System.out.println("\n" + Colors.BOLD + Colors.BRIGHT_CYAN + "═══ Process Summary Table (nominal ms) ═══" + Colors.RESET);
-        System.out.println(Colors.BOLD + String.format("%-9s %-9s %-11s %-13s %-13s", "Process", "Priority", "Burst", "Waiting", "Turnaround") + Colors.RESET);
+        System.out.println(
+                "\n" + Colors.BOLD + Colors.BRIGHT_CYAN + "═══ Process Summary Table (nominal ms) ═══" + Colors.RESET);
+        System.out.println(Colors.BOLD
+                + String.format("%-9s %-9s %-11s %-13s %-13s", "Process", "Priority", "Burst", "Waiting", "Turnaround")
+                + Colors.RESET);
         System.out.println("─".repeat(58));
         for (Process p : processes) {
             System.out.println(String.format("%-9s %-9d %-11d %-13d %-13d",
